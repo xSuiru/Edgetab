@@ -1,0 +1,6 @@
+{
+  "manifest_version": 3,
+  "name": "Edgetab",
+  "version": "1.0.0",
+  "description": "Local Edgetab browser extension."
+}

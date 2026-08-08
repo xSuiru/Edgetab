@@ -9,7 +9,7 @@ This repository also includes a minimal `manifest.json` so the folder can load a
 Clone the repository and enter the project folder:
 
 ```powershell
-git clone https://github.com/xSuiru/Edgetab.git
+git clone https://github.com/xSuiru/Edgetab
 cd Edgetab
 ```
 

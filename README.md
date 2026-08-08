@@ -4,6 +4,17 @@ Edgetab is a local Playwright script that opens Microsoft Edge with one master p
 
 This repository also includes a minimal `manifest.json` so the folder can load as an unpacked browser extension, but the current working tool is the Node/Playwright script.
 
+## Clone
+
+Clone the repository and enter the project folder:
+
+```powershell
+git clone <repository-url>
+cd Edgetab
+```
+
+Replace `<repository-url>` with the GitHub URL for this repository.
+
 ## Install
 
 Install dependencies once:

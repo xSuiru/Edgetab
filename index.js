@@ -1,248 +1,246 @@
 const { chromium } = require("playwright");
 
-const TARGET_URL = "https://example.com";
-const FOLLOWER_COUNT = 2;
+const TARGET_URL =
+    process.argv[2] ||
+    process.env.TARGET_URL ||
+    "https://www.instantwar.com/";
+
+const FOLLOWER_COUNT = Number(process.env.FOLLOWERS || 2);
+const VIEWPORT = {
+    width: Number(process.env.WIDTH || 1280),
+    height: Number(process.env.HEIGHT || 720)
+};
+
+const BUTTONS = ["left", "middle", "right"];
 
 (async () => {
     const browser = await chromium.launch({
         channel: "msedge",
-        headless: false
+        headless: false,
+        args: [
+            "--disable-background-timer-throttling",
+            "--disable-renderer-backgrounding",
+            "--disable-backgrounding-occluded-windows"
+        ]
     });
 
-    // One context for now. We can switch to separate sessions later.
-    const context = await browser.newContext();
-
-    // --------------------------------------------------
-    // Create Master
-    // --------------------------------------------------
-
-    const master = await context.newPage();
-
-    // --------------------------------------------------
-    // Create Followers
-    // --------------------------------------------------
-
-    const followers = [];
-
-    for (let i = 0; i < FOLLOWER_COUNT; i++) {
-        const follower = await context.newPage();
-        followers.push(follower);
-    }
-
-    // --------------------------------------------------
-    // Node function called by the Master webpage
-    // --------------------------------------------------
-
-    await master.exposeFunction("sendToFollowers", async (event) => {
-        console.log("MASTER EVENT:", event);
-
-        if (event.type === "click") {
-            await Promise.allSettled(
-                followers.map(async (follower, index) => {
-                    try {
-                        // Only synchronize when URL matches
-                        if (
-                            normalizeUrl(follower.url()) !==
-                            normalizeUrl(master.url())
-                        ) {
-                            console.log(
-                                `Follower ${index + 1}: URL does not match`
-                            );
-
-                            return;
-                        }
-
-                        const element = follower.locator(event.selector).first();
-
-                        await element.waitFor({
-                            state: "attached",
-                            timeout: 1000
-                        });
-
-                        await element.click({
-                            timeout: 2000
-                        });
-
-                        console.log(
-                            `Follower ${index + 1}: click replayed`
-                        );
-                    } catch (error) {
-                        console.log(
-                            `Follower ${index + 1}: click failed`,
-                            error.message
-                        );
-                    }
-                })
-            );
-        }
+    const masterContext = await browser.newContext({
+        viewport: VIEWPORT
     });
 
-    // --------------------------------------------------
-    // Install listener BEFORE pages load
-    // --------------------------------------------------
+    const followerContexts = await Promise.all(
+        Array.from({ length: FOLLOWER_COUNT }, () =>
+            browser.newContext({
+                viewport: VIEWPORT
+            })
+        )
+    );
+
+    const master = await masterContext.newPage();
+    const followers = await Promise.all(
+        followerContexts.map(context => context.newPage())
+    );
+
+    let followerQueue = Promise.resolve();
+
+    await master.exposeFunction("sendToFollowers", event => {
+        followerQueue = followerQueue
+            .then(() => replayEventOnFollowers(followers, event))
+            .catch(error => {
+                console.log("Follower replay failed:", error.message);
+            });
+
+        return followerQueue;
+    });
 
     await master.addInitScript(() => {
-        function escapeCSS(value) {
-            if (window.CSS && CSS.escape) {
-                return CSS.escape(value);
+        let lastMove = 0;
+
+        function send(event) {
+            if (!window.sendToFollowers) {
+                return;
             }
 
-            return value.replace(
-                /([ !"#$%&'()*+,./:;<=>?@[\\\]^`{|}~])/g,
-                "\\$1"
-            );
+            window.sendToFollowers(event).catch(() => {});
         }
 
-        function createSelector(element) {
-            if (!element || element.nodeType !== Node.ELEMENT_NODE) {
-                return null;
-            }
-
-            // Prefer ID
-            if (element.id) {
-                return "#" + escapeCSS(element.id);
-            }
-
-            // Prefer useful test attributes
-            const usefulAttributes = [
-                "data-testid",
-                "data-test",
-                "data-sync-id"
-            ];
-
-            for (const attribute of usefulAttributes) {
-                const value = element.getAttribute(attribute);
-
-                if (value) {
-                    const selector =
-                        `[${attribute}="${CSS.escape(value)}"]`;
-
-                    if (document.querySelectorAll(selector).length === 1) {
-                        return selector;
-                    }
-                }
-            }
-
-            // Name
-            if (element.getAttribute("name")) {
-                const name = element.getAttribute("name");
-
-                const selector =
-                    `${element.tagName.toLowerCase()}` +
-                    `[name="${CSS.escape(name)}"]`;
-
-                if (document.querySelectorAll(selector).length === 1) {
-                    return selector;
-                }
-            }
-
-            // Build CSS path
-            const path = [];
-
-            let current = element;
-
-            while (
-                current &&
-                current.nodeType === Node.ELEMENT_NODE
-            ) {
-                let selector = current.tagName.toLowerCase();
-
-                if (current.id) {
-                    selector = "#" + escapeCSS(current.id);
-                    path.unshift(selector);
-                    break;
-                }
-
-                const parent = current.parentElement;
-
-                if (!parent) {
-                    path.unshift(selector);
-                    break;
-                }
-
-                const sameTags = Array.from(parent.children).filter(
-                    child => child.tagName === current.tagName
-                );
-
-                if (sameTags.length > 1) {
-                    const index = sameTags.indexOf(current) + 1;
-
-                    selector +=
-                        `:nth-of-type(${index})`;
-                }
-
-                path.unshift(selector);
-
-                current = parent;
-            }
-
-            return path.join(" > ");
+        function modifiers(event) {
+            return {
+                ctrl: event.ctrlKey,
+                shift: event.shiftKey,
+                alt: event.altKey,
+                meta: event.metaKey
+            };
         }
 
-        // --------------------------------------------------
-        // Capture real human clicks
-        // --------------------------------------------------
+        function mouseEvent(type, event) {
+            return {
+                type,
+                x: event.clientX,
+                y: event.clientY,
+                button: event.button,
+                ...modifiers(event)
+            };
+        }
 
-        document.addEventListener(
-            "click",
+        window.addEventListener(
+            "pointerdown",
+            event => send(mouseEvent("pointerdown", event)),
+            true
+        );
+
+        window.addEventListener(
+            "pointerup",
+            event => send(mouseEvent("pointerup", event)),
+            true
+        );
+
+        window.addEventListener(
+            "pointermove",
             event => {
-                const selector = createSelector(event.target);
+                const now = performance.now();
 
-                if (!selector) {
+                if (now - lastMove < 16) {
                     return;
                 }
 
-                window.sendToFollowers({
-                    type: "click",
-                    selector: selector,
-                    button: event.button,
-                    ctrl: event.ctrlKey,
-                    shift: event.shiftKey,
-                    alt: event.altKey,
-                    meta: event.metaKey
+                lastMove = now;
+                send(mouseEvent("pointermove", event));
+            },
+            true
+        );
+
+        window.addEventListener(
+            "wheel",
+            event => {
+                send({
+                    type: "wheel",
+                    x: event.clientX,
+                    y: event.clientY,
+                    deltaX: event.deltaX,
+                    deltaY: event.deltaY,
+                    ...modifiers(event)
                 });
             },
             true
         );
 
-        console.log("TabSync master listener installed.");
+        window.addEventListener(
+            "keydown",
+            event => {
+                if (event.repeat) {
+                    return;
+                }
+
+                send({
+                    type: "keydown",
+                    key: event.key,
+                    code: event.code,
+                    ...modifiers(event)
+                });
+            },
+            true
+        );
+
+        window.addEventListener(
+            "keyup",
+            event => {
+                send({
+                    type: "keyup",
+                    key: event.key,
+                    code: event.code,
+                    ...modifiers(event)
+                });
+            },
+            true
+        );
+
+        console.log("Instant War input sync listener installed.");
     });
 
-    // --------------------------------------------------
-    // Open website
-    // --------------------------------------------------
-
-    await master.goto(TARGET_URL);
-
-    for (const follower of followers) {
-        await follower.goto(TARGET_URL);
-    }
+    await Promise.all([
+        master.goto(TARGET_URL, { waitUntil: "domcontentloaded" }),
+        ...followers.map(follower =>
+            follower.goto(TARGET_URL, { waitUntil: "domcontentloaded" })
+        )
+    ]);
 
     console.log("");
     console.log("==============================");
-    console.log(" TabSync is running");
+    console.log(" Instant War TabSync is running");
     console.log("==============================");
+    console.log("TARGET:", TARGET_URL);
     console.log("MASTER:", master.url());
     console.log("FOLLOWERS:", followers.length);
+    console.log("VIEWPORT:", `${VIEWPORT.width}x${VIEWPORT.height}`);
     console.log("");
-    console.log("Manually use the MASTER tab.");
-    console.log("Clicks will be sent to followers.");
+    console.log("Use the MASTER window.");
+    console.log("Mouse, drag, wheel, and keyboard input will be replayed.");
     console.log("");
 
-    // Keep Node alive until browser closes
     await new Promise(resolve => {
         browser.on("disconnected", resolve);
     });
 })();
 
-function normalizeUrl(url) {
-    try {
-        const parsed = new URL(url);
+async function replayEventOnFollowers(followers, event) {
+    await Promise.allSettled(
+        followers.map(async (follower, index) => {
+            try {
+                await replayEvent(follower, event);
+            } catch (error) {
+                console.log(
+                    `Follower ${index + 1}: ${event.type} failed`,
+                    error.message
+                );
+            }
+        })
+    );
+}
 
-        parsed.hash = "";
+async function replayEvent(page, event) {
+    switch (event.type) {
+        case "pointermove":
+            await page.mouse.move(event.x, event.y);
+            break;
 
-        return parsed.toString();
-    } catch {
-        return url;
+        case "pointerdown":
+            await page.mouse.move(event.x, event.y);
+            await page.mouse.down({
+                button: toPlaywrightButton(event.button)
+            });
+            break;
+
+        case "pointerup":
+            await page.mouse.move(event.x, event.y);
+            await page.mouse.up({
+                button: toPlaywrightButton(event.button)
+            });
+            break;
+
+        case "wheel":
+            await page.mouse.move(event.x, event.y);
+            await page.mouse.wheel(event.deltaX, event.deltaY);
+            break;
+
+        case "keydown":
+            await page.keyboard.down(toPlaywrightKey(event));
+            break;
+
+        case "keyup":
+            await page.keyboard.up(toPlaywrightKey(event));
+            break;
     }
+}
+
+function toPlaywrightButton(button) {
+    return BUTTONS[button] || "left";
+}
+
+function toPlaywrightKey(event) {
+    if (event.key && event.key !== "Dead") {
+        return event.key;
+    }
+
+    return event.code;
 }

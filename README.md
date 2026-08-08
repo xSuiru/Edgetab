@@ -9,11 +9,9 @@ This repository also includes a minimal `manifest.json` so the folder can load a
 Clone the repository and enter the project folder:
 
 ```powershell
-git clone <repository-url>
+git clone https://github.com/xSuiru/Edgetab.git
 cd Edgetab
 ```
-
-Replace `<repository-url>` with the GitHub URL for this repository.
 
 ## Install
 

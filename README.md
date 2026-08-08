@@ -26,6 +26,50 @@ Before running the tool, make sure you have:
 
 The script launches Microsoft Edge through Playwright, so Edge must be installed on the machine.
 
+### Install Required Software
+
+On Windows, you can install the required software with PowerShell.
+
+Install Git:
+
+```powershell
+winget install --id Git.Git -e
+```
+
+Git download page: https://git-scm.com/downloads
+
+Install Node.js LTS, which includes `npm`:
+
+```powershell
+winget install --id OpenJS.NodeJS.LTS -e
+```
+
+Node.js download page: https://nodejs.org/
+
+Install Microsoft Edge:
+
+```powershell
+winget install --id Microsoft.Edge -e
+```
+
+Microsoft Edge download page: https://www.microsoft.com/edge/download
+
+PowerShell is included with Windows. If you need to install or update it:
+
+```powershell
+winget install --id Microsoft.PowerShell -e
+```
+
+PowerShell download page: https://github.com/PowerShell/PowerShell
+
+Check that everything is installed:
+
+```powershell
+git --version
+node --version
+npm --version
+```
+
 ## Install
 
 Install dependencies once:

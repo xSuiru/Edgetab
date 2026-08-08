@@ -13,6 +13,19 @@ git clone https://github.com/xSuiru/Edgetab
 cd Edgetab
 ```
 
+## Requirements
+
+Before running the tool, make sure you have:
+
+- Windows
+- Microsoft Edge
+- Node.js
+- npm
+- Git
+- PowerShell
+
+The script launches Microsoft Edge through Playwright, so Edge must be installed on the machine.
+
 ## Install
 
 Install dependencies once:
